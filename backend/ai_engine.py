@@ -3,13 +3,13 @@
 import os
 import json
 from typing import List, Dict
-from openai import OpenAI
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL = "gpt-4o-mini"
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 
 def answer_query(question: str, context_chunks: List[Dict], detail_mode: str = "detailed") -> Dict:
@@ -205,26 +205,15 @@ def _format_context(chunks: List[Dict]) -> str:
 
 
 def _call_llm(prompt: str) -> Dict:
-    """Call OpenAI and parse JSON response."""
+    """Call Gemini API and parse JSON response."""
     try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a precise research analyst. Always respond with valid JSON only, no extra text.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=4000,
-            response_format={"type": "json_object"},
+        response = model.generate_content(
+            f"You are a precise research analyst. Always respond with valid JSON only, no extra text.\n\n{prompt}",
+            generation_config={"response_mime_type": "application/json", "temperature": 0.2}
         )
-
-        content = response.choices[0].message.content
-        return json.loads(content)
+        return json.loads(response.text)
 
     except json.JSONDecodeError:
-        return {"error": "Failed to parse AI response", "raw": content}
+        return {"error": "Failed to parse AI response", "raw": response.text if response else ""}
     except Exception as e:
         return {"error": str(e)}

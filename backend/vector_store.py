@@ -2,15 +2,13 @@
 
 import numpy as np
 from typing import List, Dict, Optional, Any
-from openai import OpenAI
+import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 class VectorStore:
@@ -115,14 +113,18 @@ class VectorStore:
         return True
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Get embeddings in small batches to respect OpenAI free tier token limits."""
+        """Get embeddings in small batches from Gemini API."""
         all_embeddings = []
-        batch_size = 2000  # Process up to 2000 chunks per single HTTP request to avoid 3 RPM limits
+        batch_size = 100  # Gemini limits batch size to 100 texts
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i: i + batch_size]
-            response = client.embeddings.create(input=batch, model=EMBEDDING_MODEL)
-            all_embeddings.extend([data.embedding for data in response.data])
+            response = genai.embed_content(
+                model="models/text-embedding-004",
+                content=batch,
+                task_type="retrieval_document"
+            )
+            all_embeddings.extend(response['embedding'])
 
         return all_embeddings
 
