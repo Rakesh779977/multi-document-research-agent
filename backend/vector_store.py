@@ -120,7 +120,7 @@ class VectorStore:
         for i in range(0, len(texts), batch_size):
             batch = texts[i: i + batch_size]
             response = genai.embed_content(
-                model="models/text-embedding-004",
+                model="models/embedding-001",
                 content=batch,
                 task_type="retrieval_document"
             )
