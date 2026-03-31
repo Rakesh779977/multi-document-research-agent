@@ -58,8 +58,12 @@ async def upload_documents(files: List[UploadFile] = File(...)):
         content = await file.read()
         doc_name = file.filename
 
-        # Extract text page-by-page
-        pages = extract_text_from_pdf(content, doc_name)
+        try:
+            # Extract text page-by-page
+            pages = extract_text_from_pdf(content, doc_name)
+        except Exception as e:
+            results.append({"doc_name": doc_name, "status": "error", "message": f"Failed to read PDF: {str(e)}"})
+            continue
         if not pages:
             results.append({"doc_name": doc_name, "status": "error", "message": "No text extracted"})
             continue
