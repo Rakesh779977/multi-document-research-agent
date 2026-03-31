@@ -115,18 +115,14 @@ class VectorStore:
         return True
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Get embeddings from OpenAI API in batches."""
+        """Get embeddings in small batches to respect OpenAI free tier token limits."""
         all_embeddings = []
-        batch_size = 100
+        batch_size = 2000  # Process up to 2000 chunks per single HTTP request to avoid 3 RPM limits
 
         for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            response = client.embeddings.create(
-                model=EMBEDDING_MODEL,
-                input=batch,
-            )
-            batch_embeddings = [item.embedding for item in response.data]
-            all_embeddings.extend(batch_embeddings)
+            batch = texts[i: i + batch_size]
+            response = client.embeddings.create(input=batch, model=EMBEDDING_MODEL)
+            all_embeddings.extend([data.embedding for data in response.data])
 
         return all_embeddings
 
