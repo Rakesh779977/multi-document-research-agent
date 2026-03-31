@@ -2,8 +2,6 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.0
 python-multipart==0.0.9
 PyPDF2==3.0.1
-faiss-cpu==1.8.0
-packaging
 numpy<2.0.0
 openai>=1.50.0,<2.0.0
 tiktoken==0.7.0

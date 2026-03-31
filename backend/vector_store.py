@@ -1,8 +1,7 @@
 """FAISS vector store management with metadata mapping."""
 
 import numpy as np
-import faiss
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
@@ -15,24 +14,32 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 class VectorStore:
-    """In-memory FAISS index with metadata mapping."""
+    """In-memory Vector index using pure NumPy."""
 
     def __init__(self, dimension: int = 1536):
         self.dimension = dimension
-        self.index = faiss.IndexFlatL2(dimension)
-        self.metadata: List[Dict] = []  # parallel array: metadata[i] ↔ vector i
-        self.documents: Dict[str, Dict] = {}  # doc_name → { name, num_pages, num_chunks }
+        self.vectors: Optional[np.ndarray] = None
+        self.metadata: List[Dict[str, Any]] = []  # parallel array: metadata[i] ↔ vector i
+        self.documents: Dict[str, Dict[str, Any]] = {}  # doc_name → { name, num_pages, num_chunks }
 
     def add_chunks(self, chunks: List[Dict]) -> None:
-        """Embed chunks and add to FAISS index."""
+        """Embed chunks and add to vector store."""
         if not chunks:
             return
 
         texts = [c["text"] for c in chunks]
         embeddings = self._get_embeddings(texts)
-        vectors = np.array(embeddings, dtype="float32")
+        
+        # Normalize embeddings for cosine similarity
+        new_vecs = np.array(embeddings, dtype="float32")
+        norms = np.linalg.norm(new_vecs, axis=1, keepdims=True)
+        new_vecs = new_vecs / (norms + 1e-10)
 
-        self.index.add(vectors)
+        if self.vectors is None:
+            self.vectors = new_vecs
+        else:
+            self.vectors = np.vstack([self.vectors, new_vecs])
+            
         self.metadata.extend(chunks)
 
         # Track document info
@@ -46,25 +53,33 @@ class VectorStore:
                 }
             self.documents[doc_name]["num_chunks"] += 1
             self.documents[doc_name]["num_pages"] = max(
-                self.documents[doc_name]["num_pages"], chunk["page_number"]
+                self.documents[doc_name]["num_pages"], int(chunk["page_number"])
             )
 
     def search(self, query: str, top_k: int = 10) -> List[Dict]:
-        """Search for the most similar chunks to the query."""
-        if self.index.ntotal == 0:
+        """Search for the most similar chunks to the query using cosine similarity."""
+        if self.vectors is None or len(self.metadata) == 0:
             return []
 
         query_embedding = self._get_embeddings([query])[0]
-        query_vector = np.array([query_embedding], dtype="float32")
+        query_vector = np.array(query_embedding, dtype="float32")
+        query_vector = query_vector / (np.linalg.norm(query_vector) + 1e-10)
 
-        distances, indices = self.index.search(query_vector, min(top_k, self.index.ntotal))
+        # Cosine similarity (dot product of normalized vectors)
+        similarities = np.dot(self.vectors, query_vector)
+        
+        # Get top-k indices
+        k = min(top_k, len(self.metadata))
+        # argpartition is faster than argsort for top-k
+        indices = np.argpartition(similarities, -k)[-k:]
+        # Sort the top-k exactly
+        indices = indices[np.argsort(similarities[indices])[::-1]]
 
         results = []
-        for dist, idx in zip(distances[0], indices[0]):
-            if idx < 0:
-                continue
-            meta = self.metadata[idx].copy()
-            meta["score"] = float(dist)
+        for idx in indices:
+            meta: Dict[str, Any] = dict(self.metadata[idx])
+            # For cosine sim, higher is better. Convert to distance-like score or just return it
+            meta["score"] = float(similarities[idx])
             results.append(meta)
 
         return results
@@ -82,7 +97,7 @@ class VectorStore:
         return list(self.documents.values())
 
     def remove_document(self, doc_name: str) -> bool:
-        """Remove a document and rebuild the FAISS index."""
+        """Remove a document and rebuild the store."""
         if doc_name not in self.documents:
             return False
 
@@ -90,9 +105,9 @@ class VectorStore:
         new_metadata = [m for m in self.metadata if m["doc_name"] != doc_name]
 
         # Rebuild index
-        self.index = faiss.IndexFlatL2(self.dimension)
+        self.vectors = None
         self.metadata = []
-        del self.documents[doc_name]
+        self.documents.pop(doc_name, None)
 
         if new_metadata:
             self.add_chunks(new_metadata)
