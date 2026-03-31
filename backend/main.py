@@ -61,25 +61,25 @@ async def upload_documents(files: List[UploadFile] = File(...)):
         try:
             # Extract text page-by-page
             pages = extract_text_from_pdf(content, doc_name)
+            if not pages:
+                results.append({"doc_name": doc_name, "status": "error", "message": "No text extracted"})
+                continue
+
+            # Chunk the pages
+            chunks = chunk_pages(pages)
+
+            # Add to vector store (embeds + indexes)
+            store.add_chunks(chunks)
+
+            results.append({
+                "doc_name": doc_name,
+                "status": "success",
+                "pages_extracted": len(pages),
+                "chunks_created": len(chunks),
+            })
         except Exception as e:
-            results.append({"doc_name": doc_name, "status": "error", "message": f"Failed to read PDF: {str(e)}"})
+            results.append({"doc_name": doc_name, "status": "error", "message": f"Server crash during processing: {str(e)}"})
             continue
-        if not pages:
-            results.append({"doc_name": doc_name, "status": "error", "message": "No text extracted"})
-            continue
-
-        # Chunk the pages
-        chunks = chunk_pages(pages)
-
-        # Add to vector store (embeds + indexes)
-        store.add_chunks(chunks)
-
-        results.append({
-            "doc_name": doc_name,
-            "status": "success",
-            "pages_extracted": len(pages),
-            "chunks_created": len(chunks),
-        })
 
     return {"uploaded": results, "total_documents": len(store.get_documents())}
 
