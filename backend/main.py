@@ -62,6 +62,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
             # Extract text page-by-page
             pages = extract_text_from_pdf(content, doc_name)
             if not pages:
+                print(f"UPLOAD ERROR: No text extracted from {doc_name} (likely a scanned image or empty PDF)")
                 results.append({"doc_name": doc_name, "status": "error", "message": "No text extracted"})
                 continue
 
@@ -71,6 +72,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
             # Add to vector store (embeds + indexes)
             store.add_chunks(chunks)
 
+            print(f"UPLOAD SUCCESS: {doc_name} uploaded and embedded via Gemini")
             results.append({
                 "doc_name": doc_name,
                 "status": "success",
@@ -78,6 +80,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 "chunks_created": len(chunks),
             })
         except Exception as e:
+            print(f"UPLOAD EXCEPTION FOR {doc_name}: {str(e)}")
             results.append({"doc_name": doc_name, "status": "error", "message": f"Server crash during processing: {str(e)}"})
             continue
 
