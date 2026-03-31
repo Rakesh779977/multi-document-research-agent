@@ -113,7 +113,8 @@ class VectorStore:
         return True
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Get embeddings in small batches from Gemini API."""
+        """Get embeddings in small batches from Gemini API safely bypassing local quotas."""
+        import time
         all_embeddings = []
         batch_size = 100  # Gemini limits batch size to 100 texts
 
@@ -125,6 +126,12 @@ class VectorStore:
                 task_type="retrieval_document"
             )
             all_embeddings.extend(response['embedding'])
+            
+            # Google Free Tier limits are extremely restrictive (often 15 RPM).
+            # We explicitly sleep 4 seconds between batches to never trigger the 429 Resource Exhausted error
+            # which otherwise causes the SDK to hang for 2+ minutes retrying.
+            if i + batch_size < len(texts):
+                time.sleep(4)
 
         return all_embeddings
 
