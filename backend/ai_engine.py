@@ -33,29 +33,22 @@ Answer the following question using ONLY the provided context.
 
 QUESTION: {question}
 
-CONTEXT (from multiple documents):
+CONTEXT:
 {context_text}
 
-You MUST respond in valid JSON format with this structure:
+Respond in valid JSON:
 {{
-    "answer": "Your detailed answer here",
-    "confidence_score": 0.0 to 1.0,
-    "why_this_answer": "Explanation of why this answer was derived and which evidence supports it",
+    "answer": "Your answer (2-3 sentences)",
+    "confidence_score": 0.0,
+    "why_this_answer": "Brief explanation",
     "citations": [
         {{
             "doc_name": "document name",
-            "page_number": page number,
-            "snippet": "exact relevant quote from the context"
+            "page_number": 1,
+            "snippet": "short quote"
         }}
     ]
-}}
-
-Rules:
-- Include ALL relevant citations from the context
-- confidence_score should reflect how well the context supports the answer
-- If the context doesn't contain enough info, say so and set confidence low
-- The snippet must be an EXACT quote from the provided context
-"""
+}}"""
 
     return _call_llm(prompt)
 
@@ -196,11 +189,17 @@ Identify common themes, trends, and patterns. Respond in valid JSON:
 
 
 def _format_context(chunks: List[Dict]) -> str:
-    """Format chunks into a readable context string."""
+    """Format chunks into a readable context string.
+    
+    Chunks are truncated to 300 chars to stay under Gemini free tier token limits.
+    Only the top 5 most relevant chunks are used.
+    """
     parts = []
-    for c in chunks:
+    for c in chunks[:5]:  # Only use top 5 chunks
+        # Truncate text to keep token count low
+        text = c['text'][:300]
         parts.append(
-            f"[Source: {c['doc_name']}, Page {c['page_number']}]\n{c['text']}"
+            f"[Source: {c['doc_name']}, Page {c['page_number']}]\n{text}"
         )
     return "\n\n".join(parts)
 
