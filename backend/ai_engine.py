@@ -1,51 +1,45 @@
-"""AI analysis engine — OpenAI-powered reasoning with structured outputs."""
+"""AI analysis engine — Groq (LLaMA 3.3 70B) for reasoning, Google Gemini for embeddings."""
 
 import os
 import json
 from typing import List, Dict
-import google.generativeai as genai
+from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("OPENAI_API_KEY")
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel("gemini-2.0-flash")
+# Groq client — free tier: 14,400 requests/day, 30 RPM on llama-3.3-70b-versatile
+GROQ_MODEL = "llama-3.3-70b-versatile"
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
 def answer_query(question: str, context_chunks: List[Dict], detail_mode: str = "detailed") -> Dict:
-    """
-    Answer a question using retrieved context chunks.
-    Returns structured response with citations, confidence, and explanation.
-    """
+    """Answer a question using retrieved context chunks."""
     context_text = _format_context(context_chunks)
 
     detail_instruction = (
-        "Provide a concise, high-level summary answer."
+        "Give a concise 2-3 sentence answer."
         if detail_mode == "simple"
-        else "Provide a thorough, detailed analysis with specific evidence."
+        else "Give a thorough, detailed answer with specific evidence."
     )
 
-    prompt = f"""You are a research assistant analyzing multiple academic documents.
-Answer the following question using ONLY the provided context.
-
-{detail_instruction}
+    prompt = f"""{detail_instruction}
 
 QUESTION: {question}
 
 CONTEXT:
 {context_text}
 
-Respond in valid JSON:
+Respond ONLY with valid JSON, no extra text:
 {{
-    "answer": "Your answer (2-3 sentences)",
-    "confidence_score": 0.0,
-    "why_this_answer": "Brief explanation",
+    "answer": "Your answer here",
+    "confidence_score": 0.85,
+    "why_this_answer": "Brief explanation of evidence used",
     "citations": [
         {{
             "doc_name": "document name",
             "page_number": 1,
-            "snippet": "short quote"
+            "snippet": "exact short quote"
         }}
     ]
 }}"""
@@ -54,166 +48,138 @@ Respond in valid JSON:
 
 
 def compare_documents(doc_chunks: Dict[str, List[Dict]]) -> Dict:
-    """
-    Compare key ideas across all documents.
-    doc_chunks: { doc_name: [chunk_dicts] }
-    """
+    """Compare key ideas across all documents."""
     context = ""
     for doc_name, chunks in doc_chunks.items():
-        text = " ".join(c["text"] for c in chunks[:10])  # Limit per doc
-        context += f"\n\n--- DOCUMENT: {doc_name} ---\n{text}"
+        text = " ".join(c["text"][:200] for c in chunks[:5])
+        context += f"\n\n--- {doc_name} ---\n{text}"
 
-    prompt = f"""You are a research analyst comparing multiple academic documents.
-
-DOCUMENTS:
-{context}
-
-Analyze and compare these documents. Respond in valid JSON:
+    prompt = f"""Compare these academic documents. Respond ONLY with valid JSON:
 {{
     "comparison": {{
         "key_ideas": [
             {{
-                "topic": "topic/theme name",
+                "topic": "topic name",
                 "documents": [
                     {{
-                        "doc_name": "document name",
-                        "position": "what this document says about the topic",
-                        "snippet": "relevant quote"
+                        "doc_name": "name",
+                        "position": "what this doc says",
+                        "snippet": "short quote"
                     }}
                 ]
             }}
         ],
-        "similarities": ["list of shared ideas or conclusions"],
-        "differences": ["list of differing viewpoints or findings"],
-        "summary": "Overall comparison summary"
+        "similarities": ["shared idea 1"],
+        "differences": ["difference 1"],
+        "summary": "Overall comparison"
     }},
-    "citations": [
-        {{
-            "doc_name": "document name",
-            "page_number": 1,
-            "snippet": "relevant quote"
-        }}
-    ],
-    "confidence_score": 0.0 to 1.0
+    "citations": [{{"doc_name": "name", "page_number": 1, "snippet": "quote"}}],
+    "confidence_score": 0.8
 }}
-"""
+
+DOCUMENTS:
+{context}"""
 
     return _call_llm(prompt)
 
 
 def detect_contradictions(doc_chunks: Dict[str, List[Dict]]) -> Dict:
-    """
-    Detect contradictions between documents.
-    """
+    """Detect contradictions between documents."""
     context = ""
     for doc_name, chunks in doc_chunks.items():
-        text = " ".join(c["text"] for c in chunks[:10])
-        context += f"\n\n--- DOCUMENT: {doc_name} ---\n{text}"
+        text = " ".join(c["text"][:200] for c in chunks[:5])
+        context += f"\n\n--- {doc_name} ---\n{text}"
 
-    prompt = f"""You are a research analyst looking for contradictions between academic documents.
-
-DOCUMENTS:
-{context}
-
-Find any contradicting or conflicting statements between the documents.
-Respond in valid JSON:
+    prompt = f"""Find contradictions between these academic documents. Respond ONLY with valid JSON:
 {{
     "contradictions": [
         {{
-            "topic": "what the contradiction is about",
+            "topic": "contradiction topic",
             "statement_a": {{
-                "doc_name": "first document name",
-                "statement": "what document A says",
-                "snippet": "exact quote from document A"
+                "doc_name": "first doc",
+                "statement": "what it says",
+                "snippet": "exact quote"
             }},
             "statement_b": {{
-                "doc_name": "second document name",
-                "statement": "what document B says",
-                "snippet": "exact quote from document B"
+                "doc_name": "second doc",
+                "statement": "what it says",
+                "snippet": "exact quote"
             }},
-            "explanation": "why these statements conflict"
+            "explanation": "why they conflict"
         }}
     ],
-    "summary": "Overall summary of contradictions found (or 'No significant contradictions found')",
-    "confidence_score": 0.0 to 1.0
+    "summary": "Overall summary of contradictions",
+    "confidence_score": 0.8
 }}
 
-If no contradictions exist, return an empty contradictions array with an appropriate summary.
-"""
+DOCUMENTS:
+{context}"""
 
     return _call_llm(prompt)
 
 
 def summarize_trends(doc_chunks: Dict[str, List[Dict]]) -> Dict:
-    """
-    Identify common themes and trends, generate unified summary.
-    """
+    """Identify common themes and trends."""
     context = ""
     for doc_name, chunks in doc_chunks.items():
-        text = " ".join(c["text"] for c in chunks[:10])
-        context += f"\n\n--- DOCUMENT: {doc_name} ---\n{text}"
+        text = " ".join(c["text"][:200] for c in chunks[:5])
+        context += f"\n\n--- {doc_name} ---\n{text}"
 
-    prompt = f"""You are a research analyst identifying trends across multiple academic documents.
-
-DOCUMENTS:
-{context}
-
-Identify common themes, trends, and patterns. Respond in valid JSON:
+    prompt = f"""Identify trends across these academic documents. Respond ONLY with valid JSON:
 {{
     "trends": [
         {{
-            "theme": "theme/trend name",
-            "description": "description of this trend",
-            "supporting_documents": ["list of doc names that support this trend"],
-            "evidence": [
-                {{
-                    "doc_name": "document name",
-                    "snippet": "supporting quote"
-                }}
-            ]
+            "theme": "theme name",
+            "description": "description",
+            "supporting_documents": ["doc1"],
+            "evidence": [{{"doc_name": "name", "snippet": "quote"}}]
         }}
     ],
-    "unified_summary": "A comprehensive summary synthesizing insights from all documents",
-    "citations": [
-        {{
-            "doc_name": "document name",
-            "page_number": 1,
-            "snippet": "relevant quote"
-        }}
-    ],
-    "confidence_score": 0.0 to 1.0
+    "unified_summary": "Comprehensive synthesis of all documents",
+    "citations": [{{"doc_name": "name", "page_number": 1, "snippet": "quote"}}],
+    "confidence_score": 0.8
 }}
-"""
+
+DOCUMENTS:
+{context}"""
 
     return _call_llm(prompt)
 
 
 def _format_context(chunks: List[Dict]) -> str:
-    """Format chunks into a readable context string.
-    
-    Chunks are truncated to 300 chars to stay under Gemini free tier token limits.
-    Only the top 5 most relevant chunks are used.
-    """
+    """Format top 5 chunks into context string, each truncated to 400 chars."""
     parts = []
-    for c in chunks[:5]:  # Only use top 5 chunks
-        # Truncate text to keep token count low
-        text = c['text'][:300]
-        parts.append(
-            f"[Source: {c['doc_name']}, Page {c['page_number']}]\n{text}"
-        )
+    for c in chunks[:5]:
+        text = c["text"][:400]
+        parts.append(f"[Source: {c['doc_name']}, Page {c['page_number']}]\n{text}")
     return "\n\n".join(parts)
 
 
 def _call_llm(prompt: str) -> Dict:
-    """Call Gemini API and parse JSON response."""
+    """Call Groq API and parse JSON response."""
     try:
-        response = model.generate_content(
-            f"You are a precise research analyst. Always respond with valid JSON only, no extra text.\n\n{prompt}",
-            generation_config={"response_mime_type": "application/json", "temperature": 0.2}
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise research analyst. Always respond with valid JSON only, no extra text, no markdown fences.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=1500,
         )
-        return json.loads(response.text)
 
-    except json.JSONDecodeError:
-        return {"error": "Failed to parse AI response", "raw": response.text if response else ""}
+        content = response.choices[0].message.content.strip()
+        # Strip markdown fences if model adds them anyway
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content)
+
+    except json.JSONDecodeError as e:
+        return {"error": f"Failed to parse AI response: {e}"}
     except Exception as e:
         return {"error": str(e)}
